@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/containernetworking/cni/pkg/invoke"
@@ -15,10 +16,10 @@ import (
 
 /*
 {
+	"cniVersion": "0.2.0",
   "name": "cni-neutron-ovs",
   "type": "gofer",
 	"neutronURL": "https://somehost:9696",
-	"cniVersion": "0.2.0",
 	"delegate": {
     "name": "cni-ovs",
     "type": "ovs",
@@ -61,15 +62,13 @@ func delegateAdd(id string, netconf map[string]interface{}) error {
 
 	result, err := invoke.DelegateAdd(netconf["type"].(string), netconfBytes)
 	if err != nil {
-		return err
+		return fmt.Errorf("error invoking delegate: %v", err)
 	}
 
 	return result.Print()
 }
 
-//
 // parse extra args i.e. AUTH_TOKEN=foo;NETWORK_ID=bar
-//
 func parseExtraArgs(args string) (map[string]string, error) {
 	m := make(map[string]string)
 
@@ -127,10 +126,17 @@ func cmdAdd(args *skel.CmdArgs) error {
 		Status:       "UP",
 	}
 
+	p, err := client.CreatePort(port)
 	_, err = client.CreatePort(port)
 	if err != nil {
 		return fmt.Errorf("error calling neutron create port: %v", err)
 	}
+
+	if len(p.FixedIPs) != 1 {
+		return fmt.Errorf("error neutron create port failed to allocate ip address")
+	}
+
+	os.Setenv("NEUTRON_IP", p.FixedIPs[0].IPAddress+"/32")
 
 	err = delegateAdd(args.ContainerID, n.Delegate)
 	if err != nil {

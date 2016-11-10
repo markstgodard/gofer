@@ -2,15 +2,12 @@ package main_test
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/containernetworking/cni/pkg/skel"
-	noop_debug "github.com/containernetworking/cni/plugins/test/noop/debug"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -20,14 +17,11 @@ import (
 var _ = Describe("Neutron CNI Plugin", func() {
 
 	var (
+		neutronServer   *httptest.Server
 		cmd             *exec.Cmd
-		debugFileName   string
 		networkID       string
 		authToken       string
-		debug           *noop_debug.Debug
 		expectedCmdArgs skel.CmdArgs
-
-		neutronServer *httptest.Server
 	)
 
 	const delegateInput = `
@@ -53,7 +47,7 @@ var _ = Describe("Neutron CNI Plugin", func() {
         "device_owner": "",
         "fixed_ips": [
             {
-                "ip_address": "192.168.111.4",
+                "ip_address": "1.2.3.4",
                 "subnet_id": "22b44fc2-4ffb-4de4-b0f9-69d58b37ae27"
             }
         ],
@@ -66,10 +60,7 @@ var _ = Describe("Neutron CNI Plugin", func() {
     }
 }`
 
-	var cniCommand = func(command, input string) *exec.Cmd {
-
-		cniArgs := fmt.Sprintf("DEBUG=%s;AUTH_TOKEN=%s;NETWORK_ID=%s", debugFileName, authToken, networkID)
-
+	var cniCommand = func(command, input, args string) *exec.Cmd {
 		toReturn := exec.Command(paths.PathToPlugin)
 		toReturn.Env = []string{
 			"CNI_COMMAND=" + command,
@@ -77,7 +68,7 @@ var _ = Describe("Neutron CNI Plugin", func() {
 			"CNI_NETNS=/some/netns/path",
 			"CNI_IFNAME=some-eth0",
 			"CNI_PATH=" + paths.CNIPath,
-			"CNI_ARGS=" + cniArgs,
+			"CNI_ARGS=" + args,
 		}
 		toReturn.Stdin = strings.NewReader(input)
 		return toReturn
@@ -93,16 +84,7 @@ var _ = Describe("Neutron CNI Plugin", func() {
 		authToken = "some-token"
 		networkID = "6aeaf34a-c482-4bd3-9dc3-7faf36412f12"
 
-		debugFile, err := ioutil.TempFile("", "cni_debug")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(debugFile.Close()).To(Succeed())
-		debugFileName = debugFile.Name()
-
-		debug = &noop_debug.Debug{
-			ReportResult:         `{ "ip4": { "ip": "1.2.3.4/32" } }`,
-			ReportVersionSupport: []string{"0.1.0", "0.2.0", "0.3.0"},
-		}
-		Expect(debug.WriteDebug(debugFileName)).To(Succeed())
+		cniArgs := fmt.Sprintf("AUTH_TOKEN=%s;NETWORK_ID=%s", authToken, networkID)
 
 		input := fmt.Sprintf(inputTemplate, neutronServer.URL)
 
@@ -110,16 +92,15 @@ var _ = Describe("Neutron CNI Plugin", func() {
 			ContainerID: "some-container-id",
 			Netns:       "/some/netns/path",
 			IfName:      "some-eth0",
-			Args:        "DEBUG=" + debugFileName,
+			Args:        cniArgs,
 			Path:        "/some/bin/path",
 			StdinData:   []byte(input),
 		}
-		cmd = cniCommand("ADD", input)
+		cmd = cniCommand("ADD", input, cniArgs)
 	})
 
 	AfterEach(func() {
 		neutronServer.Close()
-		os.Remove(debugFileName)
 	})
 
 	Context("ADD", func() {

@@ -18,7 +18,7 @@ func TestCni(t *testing.T) {
 }
 
 const packagePath = "github.com/markstgodard/gofer/cni"
-const noopPath = "github.com/containernetworking/cni/plugins/test/noop"
+const noopPath = "github.com/markstgodard/gofer/cni/noop"
 
 var paths testPaths
 
