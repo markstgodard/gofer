@@ -123,11 +123,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 		Name:         args.ContainerID,
 		DeviceID:     "d6b4d3a5-c700-476f-b609-1493dd9dadc0",
 		AdminStateUp: true,
-		Status:       "UP",
 	}
 
 	p, err := client.CreatePort(port)
-	_, err = client.CreatePort(port)
 	if err != nil {
 		return fmt.Errorf("error calling neutron create port: %v", err)
 	}
