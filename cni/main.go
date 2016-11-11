@@ -147,7 +147,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 	port := neutron.Port{
 		NetworkID:    networkID,
 		Name:         args.ContainerID,
-		DeviceID:     "d6b4d3a5-c700-476f-b609-1493dd9dadc0",
 		AdminStateUp: true,
 	}
 
