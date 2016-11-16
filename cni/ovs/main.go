@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"runtime"
 
 	"github.com/containernetworking/cni/pkg/ip"
@@ -58,16 +59,26 @@ func cmdAdd(args *skel.CmdArgs) error {
 	// hostIfName := fmt.Sprintf("o-%s-0", args.ContainerID)
 	// containerIfName := fmt.Sprintf("o-%s-1", args.ContainerID)
 
-	// hostIfName, err = setupVeth(netns, args.IfName, n.MTU)
-	_, err = setupVeth(netns, args.IfName, n.MTU)
+	hostIfName, err := setupVeth(netns, args.IfName, n.MTU)
 	if err != nil {
 		return err
 	}
 
-	// err = connectToOVS(ovsBridgeName, hostIfName, ovsPortNumber, containerIP, containerMAC, tunnelID)
-	// if err != nil {
-	// 	return err
-	// }
+	// tunnelPort     = 10
+	// tunnelID       = 101
+	// bridgeName     = "ovs-bridge"
+	// tunnelPortName = "remote-tun"
+
+	// TODO: hack
+	containerIP := ip
+	containerMAC := "00:00:00:00:00:01"
+	tunnelID := 101
+	ovsPortNumber := 10
+
+	err = connectToOVS(n.BrName, hostIfName, ovsPortNumber, containerIP, containerMAC, tunnelID)
+	if err != nil {
+		return err
+	}
 
 	result := types.Result{}
 	if ip != "" {
@@ -116,6 +127,62 @@ func setupVeth(netns ns.NetNS, ifName string, mtu int) (string, error) {
 
 	// return hostVeth
 	return hostVethName, nil
+}
+
+var debug bool
+
+func execCommand(command string, args ...string) ([]byte, error) {
+	if debug {
+		fmt.Printf("%s", command)
+		for _, arg := range args {
+			fmt.Printf(" %s", arg)
+		}
+		fmt.Printf("\n")
+	}
+	return exec.Command(command, args...).CombinedOutput()
+}
+
+func addFlow(containerIP, containerMAC, bridgeName string, tunnelPort, tunnelID int) error {
+	addMacFlow := fmt.Sprintf("ovs-ofctl add-flow %s table=1,tun_id=%d,dl_dst=%s,actions=output:%d", bridgeName, tunnelID, containerMAC, tunnelPort)
+	output, err := execCommand("bash", "-c", addMacFlow)
+	if err != nil {
+		return fmt.Errorf("%s: %s", err, output)
+	}
+
+	addIPFlow := fmt.Sprintf("ovs-ofctl add-flow %s table=1,tun_id=%d,arp,nw_dst=%s,actions=output:%d", bridgeName, tunnelID, containerIP, tunnelPort)
+	output, err = execCommand("bash", "-c", addIPFlow)
+	if err != nil {
+		return fmt.Errorf("%s: %s", err, output)
+	}
+
+	return nil
+}
+
+func connectToOVS(ovsBridgeName, interfaceName string, ovsPortNumber int, containerIP, containerMAC string, tunnelID int) error {
+	cmd := fmt.Sprintf("ovs-vsctl add-port %s %s -- set interface %s ofport_request=%d", ovsBridgeName, interfaceName, interfaceName, ovsPortNumber)
+	output, err := execCommand("bash", "-c", cmd)
+	if err != nil {
+		return fmt.Errorf("%s: %s", err, output)
+	}
+
+	err = addFlow(containerIP, containerMAC, ovsBridgeName, ovsPortNumber, tunnelID)
+	if err != nil {
+		panic(err)
+	}
+
+	anotherFlow := fmt.Sprintf("ovs-ofctl add-flow %s 'table=0,in_port=%d,actions=set_field:%d->tun_id,resubmit(,1)'", ovsBridgeName, ovsPortNumber, tunnelID)
+	output, err = execCommand("bash", "-c", anotherFlow)
+	if err != nil {
+		return fmt.Errorf("%s: %s", err, output)
+	}
+
+	ifUpCommand := fmt.Sprintf("ifconfig %s up", interfaceName)
+	output, err = execCommand("bash", "-c", ifUpCommand)
+	if err != nil {
+		return fmt.Errorf("%s: %s", err, output)
+	}
+
+	return nil
 }
 
 func cmdDel(args *skel.CmdArgs) error {
