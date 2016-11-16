@@ -1,2 +1,5 @@
 *.swp
 bin
+cni/ovs/ovs
+cni/noop/noop
+cni/cni
