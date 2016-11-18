@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/markstgodard/go-keystone/keystone"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gexec"
@@ -18,13 +19,13 @@ import (
 var _ = Describe("Neutron CNI Plugin", func() {
 
 	var (
-		neutronServer *httptest.Server
-		stateDir      string
-		cmd           *exec.Cmd
-		cniArgs       string
-		input         string
-		networkID     string
-		authToken     string
+		neutronServer  *httptest.Server
+		keystoneServer *httptest.Server
+		stateDir       string
+		cmd            *exec.Cmd
+		cniArgs        string
+		input          string
+		networkID      string
 	)
 
 	const delegateInput = `
@@ -39,6 +40,7 @@ var _ = Describe("Neutron CNI Plugin", func() {
   "name": "cni-neutron-noop",
   "type": "gofer",
   "neutronURL": "%s",
+  "keystoneURL": "%s",
   "stateDir": "%s",
 	"delegate": ` +
 		delegateInput +
@@ -89,22 +91,26 @@ var _ = Describe("Neutron CNI Plugin", func() {
 			case http.MethodDelete:
 				w.WriteHeader(http.StatusNoContent)
 			}
+		}))
 
+		// setup fake keystone server
+		keystoneServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set(keystone.X_SUBJECT_TOKEN_HEADER, "fake-token")
+			w.WriteHeader(http.StatusCreated)
 		}))
 
 		stateDir, err = ioutil.TempDir("", "cniStateDir")
 		Expect(err).ToNot(HaveOccurred())
 
-		authToken = "some-token"
 		networkID = "6aeaf34a-c482-4bd3-9dc3-7faf36412f12"
+		cniArgs = fmt.Sprintf("NETWORK_ID=%s", networkID)
 
-		cniArgs = fmt.Sprintf("AUTH_TOKEN=%s;NETWORK_ID=%s", authToken, networkID)
-
-		input = fmt.Sprintf(inputTemplate, neutronServer.URL, stateDir)
+		input = fmt.Sprintf(inputTemplate, neutronServer.URL, keystoneServer.URL, stateDir)
 	})
 
 	AfterEach(func() {
 		neutronServer.Close()
+		keystoneServer.Close()
 		os.Remove(stateDir)
 	})
 

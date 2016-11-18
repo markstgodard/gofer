@@ -13,6 +13,7 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/version"
+	"github.com/markstgodard/go-keystone/keystone"
 	"github.com/markstgodard/go-neutron/neutron"
 )
 
@@ -22,6 +23,9 @@ import (
   "name": "cni-neutron-ovs",
   "type": "gofer",
 	"neutronURL": "https://somehost:9696",
+	"keystoneURL": "https://somehost:5000",
+	"keystoneUser": "admin",
+	"keystonePassword": "some-password",
 	"delegate": {
     "name": "cni-ovs",
     "type": "ovs",
@@ -38,9 +42,12 @@ const defaultStateDir = "/var/lib/cni/gofer"
 
 type NetConf struct {
 	types.NetConf
-	NeutronURL string
-	StateDir   string
-	Delegate   map[string]interface{} `json:"delegate"`
+	NeutronURL       string
+	KeystoneURL      string
+	KeystoneUser     string
+	KeystonePassword string
+	StateDir         string
+	Delegate         map[string]interface{} `json:"delegate"`
 }
 
 type ContainerState struct {
@@ -133,7 +140,15 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	authToken, err := getExtraArg("AUTH_TOKEN", extra)
+	keystoneClient, err := keystone.NewClient(n.KeystoneURL)
+	if err != nil {
+		return err
+	}
+
+	// get token for username, password and domain name
+	// TODO: inject domain name as well?
+	auth := keystone.NewAuth(n.KeystoneUser, n.KeystonePassword, "Default")
+	authToken, err := keystoneClient.Tokens(auth)
 	if err != nil {
 		return err
 	}
@@ -223,12 +238,15 @@ func cmdDel(args *skel.CmdArgs) error {
 		return fmt.Errorf("error calling delegate : %v", err)
 	}
 
-	extra, err := parseExtraArgs(args.Args)
+	keystoneClient, err := keystone.NewClient(n.KeystoneURL)
 	if err != nil {
 		return err
 	}
 
-	authToken, err := getExtraArg("AUTH_TOKEN", extra)
+	// get token for username, password and domain name
+	// TODO: inject domain name as well?
+	auth := keystone.NewAuth(n.KeystoneUser, n.KeystonePassword, "Default")
+	authToken, err := keystoneClient.Tokens(auth)
 	if err != nil {
 		return err
 	}
