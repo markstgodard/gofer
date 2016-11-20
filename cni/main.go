@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/containernetworking/cni/pkg/invoke"
 	"github.com/containernetworking/cni/pkg/skel"
@@ -22,18 +21,20 @@ import (
 	"cniVersion": "0.2.0",
   "name": "cni-neutron-ovs",
   "type": "gofer",
-	"neutronURL": "https://somehost:9696",
-	"keystoneURL": "https://somehost:5000",
-	"keystoneUser": "admin",
-	"keystonePassword": "some-password",
+	"neutron_url": "https://somehost:9696",
+	"keystone_url": "https://somehost:5000",
+	"keystone_user": "admin",
+	"keystone_password": "some-password",
 	"delegate": {
     "name": "cni-ovs",
     "type": "ovs",
     "bridge": "br-int"
   },
-   "metadata": {
-    "app_id": "app guid",
-    "space_id": "space guid"
+  "metadata": {
+    "app_id": "some-app-guid",
+    "org_id": "some-org-guid",
+    "policy_group_id": "some-group-policy-id",
+    "space_id": "some-space-guid"
   }
 }
 */
@@ -42,12 +43,13 @@ const defaultStateDir = "/var/lib/cni/gofer"
 
 type NetConf struct {
 	types.NetConf
-	NeutronURL       string
-	KeystoneURL      string
-	KeystoneUser     string
-	KeystonePassword string
-	StateDir         string
+	NeutronURL       string                 `json:"neutron_url"`
+	KeystoneURL      string                 `json:"keystone_url"`
+	KeystoneUser     string                 `json:"keystone_user"`
+	KeystonePassword string                 `json:"keystone_password"`
+	StateDir         string                 `json:"state_dir"`
 	Delegate         map[string]interface{} `json:"delegate"`
+	Metadata         map[string]interface{} `json:"metadata"`
 }
 
 type ContainerState struct {
@@ -101,27 +103,18 @@ func delegateDel(id string, netconf map[string]interface{}) error {
 	return nil
 }
 
-// parse extra args i.e. AUTH_TOKEN=foo;NETWORK_ID=bar
-func parseExtraArgs(args string) (map[string]string, error) {
-	m := make(map[string]string)
-
-	items := strings.Split(args, ";")
-	for _, item := range items {
-		kv := strings.Split(item, "=")
-		if len(kv) != 2 {
-			return nil, fmt.Errorf("CNI_ARGS invalid key/value pair: %s\n", kv)
-		}
-		m[kv[0]] = kv[1]
-	}
-	return m, nil
-}
-
-func getExtraArg(key string, extra map[string]string) (string, error) {
-	v, ok := extra[key]
+func getMetadata(key string, metadata map[string]interface{}) (string, error) {
+	v, ok := metadata[key]
 	if !ok {
-		return "", fmt.Errorf("missing '%s' in CNI_ARGS", key)
+		return "", fmt.Errorf("missing '%s' in metadata", key)
 	}
-	return v, nil
+
+	value, ok := v.(string)
+	if !ok {
+		return "", fmt.Errorf("invalid type for '%s' in metadata", key)
+	}
+
+	return value, nil
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
@@ -130,12 +123,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	extra, err := parseExtraArgs(args.Args)
-	if err != nil {
-		return err
-	}
-
-	networkID, err := getExtraArg("NETWORK_ID", extra)
+	networkID, err := getMetadata("space_id", n.Metadata)
 	if err != nil {
 		return err
 	}
@@ -174,6 +162,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("error neutron create port failed to allocate ip address")
 	}
 
+	// change to pass in netconf
 	ip := p.FixedIPs[0].IPAddress
 	os.Setenv("NEUTRON_IP", ip+"/32")
 

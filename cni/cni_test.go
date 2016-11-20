@@ -23,7 +23,6 @@ var _ = Describe("Neutron CNI Plugin", func() {
 		keystoneServer *httptest.Server
 		stateDir       string
 		cmd            *exec.Cmd
-		cniArgs        string
 		input          string
 		networkID      string
 	)
@@ -39,9 +38,17 @@ var _ = Describe("Neutron CNI Plugin", func() {
 	"cniVersion": "0.2.0",
   "name": "cni-neutron-noop",
   "type": "gofer",
-  "neutronURL": "%s",
-  "keystoneURL": "%s",
-  "stateDir": "%s",
+  "neutron_url": "%s",
+  "keystone_url": "%s",
+  "keystone_username": "admin",
+  "keystone_password": "secret",
+  "state_dir": "%s",
+  "metadata": {
+    "app_id": "d5bbc5ed-886a-44e6-945d-67df1013fa16",
+    "org_id": "2ac41bbf-8eae-4f28-abab-51ca38dea3e4",
+    "policy_group_id": "d5bbc5ed-886a-44e6-945d-67df1013fa16",
+    "space_id": "4246c57d-aefc-49cc-afe0-5f734e2656e8"
+  },
 	"delegate": ` +
 		delegateInput +
 		`}`
@@ -66,7 +73,7 @@ var _ = Describe("Neutron CNI Plugin", func() {
     }
 }`
 
-	var cniCommand = func(command, input, args string) *exec.Cmd {
+	var cniCommand = func(command, input string) *exec.Cmd {
 		toReturn := exec.Command(paths.PathToPlugin)
 		toReturn.Env = []string{
 			"CNI_COMMAND=" + command,
@@ -74,7 +81,7 @@ var _ = Describe("Neutron CNI Plugin", func() {
 			"CNI_NETNS=/some/netns/path",
 			"CNI_IFNAME=some-eth0",
 			"CNI_PATH=" + paths.CNIPath,
-			"CNI_ARGS=" + args,
+			"CNI_ARGS=" + "",
 		}
 		toReturn.Stdin = strings.NewReader(input)
 		return toReturn
@@ -103,8 +110,6 @@ var _ = Describe("Neutron CNI Plugin", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		networkID = "6aeaf34a-c482-4bd3-9dc3-7faf36412f12"
-		cniArgs = fmt.Sprintf("NETWORK_ID=%s", networkID)
-
 		input = fmt.Sprintf(inputTemplate, neutronServer.URL, keystoneServer.URL, stateDir)
 	})
 
@@ -117,7 +122,7 @@ var _ = Describe("Neutron CNI Plugin", func() {
 	Context("ADD and DEL", func() {
 		It("invokes noop delegate", func() {
 			By("calling ADD")
-			cmd = cniCommand("ADD", input, cniArgs)
+			cmd = cniCommand("ADD", input)
 			session, err := gexec.Start(cmd, GinkgoWriter, GinkgoWriter)
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(session).Should(gexec.Exit(0))
@@ -136,7 +141,7 @@ var _ = Describe("Neutron CNI Plugin", func() {
 }`))
 
 			By("calling DEL")
-			cmd = cniCommand("DEL", input, cniArgs)
+			cmd = cniCommand("DEL", input)
 			session, err = gexec.Start(cmd, GinkgoWriter, GinkgoWriter)
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(session).Should(gexec.Exit(0))
