@@ -21,8 +21,9 @@ const defaultBrName = "ovs-bridge"
 
 type NetConf struct {
 	types.NetConf
-	BrName string `json:"bridge"`
-	MTU    int    `json:"mtu"`
+	BrName  string `json:"bridge"`
+	MTU     int    `json:"mtu"`
+	BinPath string `json:"bin_path"`
 }
 
 func init() {
@@ -34,7 +35,8 @@ func init() {
 
 func loadNetConf(bytes []byte) (*NetConf, error) {
 	n := &NetConf{
-		BrName: defaultBrName,
+		BrName:  defaultBrName,
+		BinPath: "/var/vcap/packages/openvswitch/bin",
 	}
 	if err := json.Unmarshal(bytes, n); err != nil {
 		return nil, fmt.Errorf("failed to load netconf: %v", err)
@@ -75,7 +77,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	tunnelID := 101
 	ovsPortNumber := 10
 
-	err = connectToOVS(n.BrName, hostIfName, ovsPortNumber, containerIP, containerMAC, tunnelID)
+	err = connectToOVS(n.BinPath, n.BrName, hostIfName, ovsPortNumber, containerIP, containerMAC, tunnelID)
 	if err != nil {
 		return err
 	}
@@ -142,14 +144,14 @@ func execCommand(command string, args ...string) ([]byte, error) {
 	return exec.Command(command, args...).CombinedOutput()
 }
 
-func addFlow(containerIP, containerMAC, bridgeName string, tunnelPort, tunnelID int) error {
-	addMacFlow := fmt.Sprintf("ovs-ofctl add-flow %s table=1,tun_id=%d,dl_dst=%s,actions=output:%d", bridgeName, tunnelID, containerMAC, tunnelPort)
+func addFlow(path, containerIP, containerMAC, bridgeName string, tunnelPort, tunnelID int) error {
+	addMacFlow := fmt.Sprintf("%s/ovs-ofctl add-flow %s table=1,tun_id=%d,dl_dst=%s,actions=output:%d", path, bridgeName, tunnelID, containerMAC, tunnelPort)
 	output, err := execCommand("bash", "-c", addMacFlow)
 	if err != nil {
 		return fmt.Errorf("%s: %s", err, output)
 	}
 
-	addIPFlow := fmt.Sprintf("ovs-ofctl add-flow %s table=1,tun_id=%d,arp,nw_dst=%s,actions=output:%d", bridgeName, tunnelID, containerIP, tunnelPort)
+	addIPFlow := fmt.Sprintf("%s/ovs-ofctl add-flow %s table=1,tun_id=%d,arp,nw_dst=%s,actions=output:%d", path, bridgeName, tunnelID, containerIP, tunnelPort)
 	output, err = execCommand("bash", "-c", addIPFlow)
 	if err != nil {
 		return fmt.Errorf("%s: %s", err, output)
@@ -158,19 +160,19 @@ func addFlow(containerIP, containerMAC, bridgeName string, tunnelPort, tunnelID 
 	return nil
 }
 
-func connectToOVS(ovsBridgeName, interfaceName string, ovsPortNumber int, containerIP, containerMAC string, tunnelID int) error {
-	cmd := fmt.Sprintf("ovs-vsctl add-port %s %s -- set interface %s ofport_request=%d", ovsBridgeName, interfaceName, interfaceName, ovsPortNumber)
+func connectToOVS(path, ovsBridgeName, interfaceName string, ovsPortNumber int, containerIP, containerMAC string, tunnelID int) error {
+	cmd := fmt.Sprintf("%s/ovs-vsctl add-port %s %s -- set interface %s ofport_request=%d", path, ovsBridgeName, interfaceName, interfaceName, ovsPortNumber)
 	output, err := execCommand("bash", "-c", cmd)
 	if err != nil {
 		return fmt.Errorf("%s: %s", err, output)
 	}
 
-	err = addFlow(containerIP, containerMAC, ovsBridgeName, ovsPortNumber, tunnelID)
+	err = addFlow(path, containerIP, containerMAC, ovsBridgeName, ovsPortNumber, tunnelID)
 	if err != nil {
 		panic(err)
 	}
 
-	anotherFlow := fmt.Sprintf("ovs-ofctl add-flow %s 'table=0,in_port=%d,actions=set_field:%d->tun_id,resubmit(,1)'", ovsBridgeName, ovsPortNumber, tunnelID)
+	anotherFlow := fmt.Sprintf("%s/ovs-ofctl add-flow %s 'table=0,in_port=%d,actions=set_field:%d->tun_id,resubmit(,1)'", path, ovsBridgeName, ovsPortNumber, tunnelID)
 	output, err = execCommand("bash", "-c", anotherFlow)
 	if err != nil {
 		return fmt.Errorf("%s: %s", err, output)
