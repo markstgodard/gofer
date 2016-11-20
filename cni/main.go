@@ -45,7 +45,7 @@ type NetConf struct {
 	types.NetConf
 	NeutronURL       string                 `json:"neutron_url"`
 	KeystoneURL      string                 `json:"keystone_url"`
-	KeystoneUser     string                 `json:"keystone_user"`
+	KeystoneUsername string                 `json:"keystone_username"`
 	KeystonePassword string                 `json:"keystone_password"`
 	StateDir         string                 `json:"state_dir"`
 	Delegate         map[string]interface{} `json:"delegate"`
@@ -123,9 +123,11 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	networkID, err := getMetadata("space_id", n.Metadata)
+	networkName, err := getMetadata("space_id", n.Metadata)
 	if err != nil {
-		return err
+		// TODO: temp hack to get around gaol
+		networkName = "defaultNetwork"
+		// return err
 	}
 
 	keystoneClient, err := keystone.NewClient(n.KeystoneURL)
@@ -135,7 +137,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	// get token for username, password and domain name
 	// TODO: inject domain name as well?
-	auth := keystone.NewAuth(n.KeystoneUser, n.KeystonePassword, "Default")
+	auth := keystone.NewAuth(n.KeystoneUsername, n.KeystonePassword, "Default")
 	authToken, err := keystoneClient.Tokens(auth)
 	if err != nil {
 		return err
@@ -145,6 +147,18 @@ func cmdAdd(args *skel.CmdArgs) error {
 	if err != nil {
 		return err
 	}
+
+	networks, err := client.NetworksByName(networkName)
+	if err != nil {
+		return err
+	}
+
+	// TODO: hack right now, assume it is created
+	if len(networks) != 1 {
+		return fmt.Errorf("did not found a single network with name: %n", networkName)
+	}
+
+	networkID := networks[0].ID
 
 	// create neutron port
 	port := neutron.Port{
@@ -234,7 +248,7 @@ func cmdDel(args *skel.CmdArgs) error {
 
 	// get token for username, password and domain name
 	// TODO: inject domain name as well?
-	auth := keystone.NewAuth(n.KeystoneUser, n.KeystonePassword, "Default")
+	auth := keystone.NewAuth(n.KeystoneUsername, n.KeystonePassword, "Default")
 	authToken, err := keystoneClient.Tokens(auth)
 	if err != nil {
 		return err
