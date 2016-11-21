@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -46,6 +45,7 @@ func loadNetConf(bytes []byte) (*NetConf, error) {
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
+	// TODO: remove this hack
 	ip := os.Getenv("NEUTRON_IP")
 
 	n, err := loadNetConf(args.StdinData)
@@ -59,7 +59,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	defer netns.Close()
 
-	hostIfName, err := setupVeth(netns, args.IfName, n.MTU)
+	hostIfName, hwAddr, err := setupVeth(netns, args.IfName, n.MTU)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	// TODO: hack
 	containerIP := ip
-	containerMAC := "00:00:00:00:00:01"
+	containerMAC := hwAddr
 	tunnelID := 101
 	ovsPortNumber := 10
 
@@ -96,37 +96,31 @@ func cmdAdd(args *skel.CmdArgs) error {
 	return result.Print()
 }
 
-func setupVeth(netns ns.NetNS, ifName string, mtu int) (string, error) {
+func setupVeth(netns ns.NetNS, ifName string, mtu int) (string, string, error) {
 	var hostVethName string
+	var hwAddr string
 
 	err := netns.Do(func(hostNS ns.NetNS) error {
 		// create the veth pair in the container and move host end into host netns
-		hostVeth, _, err := ip.SetupVeth(ifName, mtu, hostNS)
+		hostVeth, contVeth, err := ip.SetupVeth(ifName, mtu, hostNS)
 		if err != nil {
 			return err
 		}
 
 		hostVethName = hostVeth.Attrs().Name
+		hwAddr = string(contVeth.Attrs().HardwareAddr)
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	// need to lookup hostVeth again as its index has changed during ns move
-	// hostVeth, err := netlink.LinkByName(hostVethName)
 	_, err = netlink.LinkByName(hostVethName)
 	if err != nil {
-		return "", fmt.Errorf("failed to lookup %q: %v", hostVethName, err)
+		return "", "", fmt.Errorf("failed to lookup %q: %v", hostVethName, err)
 	}
 
-	// connect host veth end to the bridge
-	// if err = netlink.LinkSetMaster(hostVeth, br); err != nil {
-	// 	return fmt.Errorf("failed to connect %q to bridge %v: %v", hostVethName, br.Attrs().Name, err)
-	// }
-
-	// return hostVeth
-	return hostVethName, nil
+	return hostVethName, hwAddr, nil
 }
 
 var debug bool
@@ -184,8 +178,45 @@ func addFlow(path, containerIP, containerMAC, bridgeName string, tunnelPort, tun
 
 	return nil
 }
+
+func removeFromOVS(path, ovsBridgeName, interfaceName string) error {
+	cmd := fmt.Sprintf("%s/ovs-vsctl del-port %s %s", path, ovsBridgeName, interfaceName)
+	output, err := execCommand("bash", "-c", cmd)
+	if err != nil {
+		return fmt.Errorf("%s: %s", err, output)
+	}
+
+	// TODO: delete flows?
+
+	return nil
+}
+
 func cmdDel(args *skel.CmdArgs) error {
-	return errors.New("not implemented")
+	// n, err := loadNetConf(args.StdinData)
+	// if err != nil {
+	// 	return err
+	// }
+
+	if args.Netns == "" {
+		return nil
+	}
+
+	// err = removeFromOVS(n.BinPath, n.BrName, hostIfName)
+	// if err != nil {
+	// 	return err
+	// }
+
+	var ipn *net.IPNet
+	err := ns.WithNetNSPath(args.Netns, func(_ ns.NetNS) error {
+		var err error
+		ipn, err = ip.DelLinkByNameAddr(args.IfName, netlink.FAMILY_V4)
+		return err
+	})
+
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func main() {
