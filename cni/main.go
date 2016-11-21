@@ -41,6 +41,10 @@ import (
 
 const defaultStateDir = "/var/lib/cni/gofer"
 
+const defaultCIDR = "10.0.3.0/24"
+const defaultNetStart = "10.0.3.20"
+const defaultNetEnd = "10.0.3.150"
+
 type NetConf struct {
 	types.NetConf
 	NeutronURL       string                 `json:"neutron_url"`
@@ -125,7 +129,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	networkName, err := getMetadata("space_id", n.Metadata)
 	if err != nil {
-		// TODO: temp hack to get around gaol
+		// TODO: temp hack to get around staging containers, goal, etc.
 		networkName = "defaultNetwork"
 		// return err
 	}
@@ -153,12 +157,43 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	// TODO: hack right now, assume it is created
-	if len(networks) != 1 {
-		return fmt.Errorf("did not found a single network with name: %n", networkName)
+	var network neutron.Network
+
+	// if not found try to create net/subnet
+	if len(networks) == 0 {
+		// create network
+		net := neutron.Network{
+			Name:         networkName,
+			Description:  networkName,
+			AdminStateUp: true,
+		}
+		network, err = client.CreateNetwork(net)
+		if err != nil {
+			return err
+		}
+
+		// create subnet
+		subnet := neutron.Subnet{
+			NetworkID: network.ID,
+			IPVersion: 4,
+			CIDR:      defaultCIDR,
+			AllocationPools: []neutron.AllocationPool{
+				{
+					Start: defaultNetStart,
+					End:   defaultNetEnd,
+				},
+			},
+		}
+
+		_, err = client.CreateSubnet(subnet)
+		if err != nil {
+			return err
+		}
+	} else {
+		network = networks[0]
 	}
 
-	networkID := networks[0].ID
+	networkID := network.ID
 
 	// create neutron port
 	port := neutron.Port{
