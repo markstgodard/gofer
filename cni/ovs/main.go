@@ -59,7 +59,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	defer netns.Close()
 
-	hostIfName, hwAddr, err := setupVeth(netns, args.IfName, n.MTU)
+	hostIfName, hwAddr, err := setupVeth(netns, args.IfName, n.MTU, ip)
 	if err != nil {
 		return err
 	}
@@ -72,6 +72,10 @@ func cmdAdd(args *skel.CmdArgs) error {
 	// TODO: hack
 	containerIP := ip
 	containerMAC := hwAddr
+	// containerMAC := "00:00:00:00:00:01"
+	if hwAddr == "" {
+		return fmt.Errorf("Invalid MAC address for container: [%s]", hwAddr)
+	}
 	tunnelID := 101
 	ovsPortNumber := 10
 
@@ -96,19 +100,31 @@ func cmdAdd(args *skel.CmdArgs) error {
 	return result.Print()
 }
 
-func setupVeth(netns ns.NetNS, ifName string, mtu int) (string, string, error) {
+func setupVeth(netns ns.NetNS, ifName string, mtu int, ipAddr string) (string, string, error) {
 	var hostVethName string
 	var hwAddr string
 
 	err := netns.Do(func(hostNS ns.NetNS) error {
 		// create the veth pair in the container and move host end into host netns
-		hostVeth, contVeth, err := ip.SetupVeth(ifName, mtu, hostNS)
+		hostVeth, _, err := ip.SetupVeth(ifName, mtu, hostNS)
+		if err != nil {
+			return err
+		}
+		hostVethName = hostVeth.Attrs().Name
+
+		// set HW addr
+		ip4 := net.ParseIP(ipAddr)
+		if err := ip.SetHWAddrByIP(ifName, ip4, nil); err != nil {
+			return err
+		}
+
+		nl, err := netlink.LinkByName(ifName)
 		if err != nil {
 			return err
 		}
 
-		hostVethName = hostVeth.Attrs().Name
-		hwAddr = string(contVeth.Attrs().HardwareAddr)
+		hwAddr = string(nl.Attrs().HardwareAddr)
+
 		return nil
 	})
 	if err != nil {
