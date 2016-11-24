@@ -53,6 +53,9 @@ var _ = Describe("Neutron CNI Plugin", func() {
 		delegateInput +
 		`}`
 
+	const getNetworksByNameResp = `{
+    "networks": []
+}`
 	const createPortResp = `{
     "port": {
         "admin_state_up": true,
@@ -73,6 +76,19 @@ var _ = Describe("Neutron CNI Plugin", func() {
     }
 }`
 
+	const createNetworkResp = `{
+  "network": {
+    "id": "cc6c1929-6b26-4a1a-8680-3ea3dd09bfc6"
+  }
+}
+`
+	const createSubnetResp = `{
+  "subnet": {
+    "id": "cc6c1929-6b26-4a1a-8680-3ea3dd09bfc6"
+  }
+}
+`
+
 	var cniCommand = func(command, input string) *exec.Cmd {
 		toReturn := exec.Command(paths.PathToPlugin)
 		toReturn.Env = []string{
@@ -92,9 +108,21 @@ var _ = Describe("Neutron CNI Plugin", func() {
 		// setup fake neutron server
 		neutronServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.Method {
+			case http.MethodGet:
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(getNetworksByNameResp))
 			case http.MethodPost:
 				w.WriteHeader(http.StatusCreated)
-				w.Write([]byte(createPortResp))
+				var resp string
+				if strings.Contains(r.RequestURI, "ports") {
+					resp = createPortResp
+				} else if strings.Contains(r.RequestURI, "networks") {
+					resp = createNetworkResp
+				} else {
+					resp = createSubnetResp
+				}
+				w.Write([]byte(resp))
+
 			case http.MethodDelete:
 				w.WriteHeader(http.StatusNoContent)
 			}

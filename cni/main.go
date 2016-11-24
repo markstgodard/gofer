@@ -129,9 +129,8 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	networkName, err := getMetadata("space_id", n.Metadata)
 	if err != nil {
-		// TODO: temp hack to get around staging containers, goal, etc.
+		// TODO: temp hack to get around staging containers
 		networkName = "defaultNetwork"
-		// return err
 	}
 
 	keystoneClient, err := keystone.NewClient(n.KeystoneURL)
