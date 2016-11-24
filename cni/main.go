@@ -16,6 +16,16 @@ import (
 	"github.com/markstgodard/go-neutron/neutron"
 )
 
+// CNI plugin which uses Neutron API for control plane (networks,subnets,ports)
+// and uses Keystone API for authentication.
+// This plugin is also Cloud Foundry aware in that it will use the `space_id`
+// to automatically created a space-based network/subnet. Cloud Foundry info
+// is passed to this plugin via Garden runC (garden external networker).
+// This plugin will delegate to another CNI plugin such as OVS for setting up
+// the virtual network interface.
+// IP address created from Neutron create port will be passed to delegate CNI
+// plugin via a runtime updated `delegate` which adds the `ip_addr` property.
+// Example CNI Plugin config:
 /*
 {
 	"cniVersion": "0.2.0",
