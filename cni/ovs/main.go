@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"os/exec"
 	"runtime"
 
@@ -24,6 +23,7 @@ type NetConf struct {
 	BrName  string `json:"bridge"`
 	MTU     int    `json:"mtu"`
 	BinPath string `json:"bin_path"`
+	IP      string `json:"ip_addr"`
 }
 
 func init() {
@@ -45,13 +45,12 @@ func loadNetConf(bytes []byte) (*NetConf, error) {
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
-	// TODO: remove this hack
-	ip := os.Getenv("NEUTRON_IP")
-
 	n, err := loadNetConf(args.StdinData)
 	if err != nil {
 		return err
 	}
+
+	ip := n.IP
 
 	netns, err := ns.GetNS(args.Netns)
 	if err != nil {
@@ -69,13 +68,14 @@ func cmdAdd(args *skel.CmdArgs) error {
 	// bridgeName     = "ovs-bridge"
 	// tunnelPortName = "remote-tun"
 
-	// TODO: hack
 	containerIP := ip
 	containerMAC := hwAddr
 	// containerMAC := "00:00:00:00:00:01"
 	if hwAddr == "" {
 		return fmt.Errorf("Invalid MAC address for container: [%s]", hwAddr)
 	}
+
+	// TODO: hack
 	tunnelID := 101
 	ovsPortNumber := 10
 

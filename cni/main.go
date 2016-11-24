@@ -220,9 +220,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("error neutron create port failed to allocate ip address")
 	}
 
-	// change to pass in netconf
+	// pass ip_addr to delegate CNI plugin
 	ip := p.FixedIPs[0].IPAddress
-	os.Setenv("NEUTRON_IP", ip+"/32")
+	n.Delegate["ip_addr"] = fmt.Sprintf("%s/32", ip)
 
 	err = delegateAdd(args.ContainerID, n.Delegate)
 	if err != nil {

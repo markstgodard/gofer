@@ -1,16 +1,36 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net"
-	"os"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/version"
 )
 
+type NetConf struct {
+	types.NetConf
+	Bridge string `json:"bridge"`
+	IP     string `json:"ip_addr"`
+}
+
+func loadNetConfig(stdin []byte) (*NetConf, error) {
+	n := &NetConf{}
+	if err := json.Unmarshal(stdin, n); err != nil {
+		return nil, fmt.Errorf("failed to load netconf: %v", err)
+	}
+	return n, nil
+}
+
 func cmdAdd(args *skel.CmdArgs) error {
-	ip := os.Getenv("NEUTRON_IP")
+	n, err := loadNetConfig(args.StdinData)
+	if err != nil {
+		return err
+	}
+
+	ip := n.IP
 
 	result := types.Result{}
 	if ip != "" {
