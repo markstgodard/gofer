@@ -24,7 +24,8 @@ import (
 // This plugin will delegate to another CNI plugin such as OVS for setting up
 // the virtual network interface.
 // IP address created from Neutron create port will be passed to delegate CNI
-// plugin via a runtime updated `delegate` which adds the `ip_addr` property.
+// plugin via a runtime updated `delegate` which adds the `ip` and `cidr` property.
+// (i.e. "ip: "10.0.1.10", "cidr": "10.0.1.10/32" )
 // Example CNI Plugin config:
 /*
 {
@@ -222,10 +223,13 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	// pass ip_addr to delegate CNI plugin
 	ip := p.FixedIPs[0].IPAddress
-	n.Delegate["ip_addr"] = fmt.Sprintf("%s/32", ip)
+	n.Delegate["ip"] = ip
+	n.Delegate["cidr"] = fmt.Sprintf("%s/32", ip)
 
 	err = delegateAdd(args.ContainerID, n.Delegate)
 	if err != nil {
+		// attempt to cleanup / delete port, but preserve original err
+		client.DeletePort(port.ID)
 		return fmt.Errorf("error calling delegate : %v", err)
 	}
 

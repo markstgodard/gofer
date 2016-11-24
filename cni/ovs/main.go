@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os/exec"
@@ -23,7 +24,8 @@ type NetConf struct {
 	BrName  string `json:"bridge"`
 	MTU     int    `json:"mtu"`
 	BinPath string `json:"bin_path"`
-	IP      string `json:"ip_addr"`
+	IP      string `json:"ip"`
+	CIDR    string `json:"cidr"`
 }
 
 func init() {
@@ -51,6 +53,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 
 	ip := n.IP
+	if ip == "" {
+		return errors.New("Missing 'ip' in delegate call to CNI plugin!")
+	}
 
 	netns, err := ns.GetNS(args.Netns)
 	if err != nil {

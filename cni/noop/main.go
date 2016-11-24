@@ -13,7 +13,8 @@ import (
 type NetConf struct {
 	types.NetConf
 	Bridge string `json:"bridge"`
-	IP     string `json:"ip_addr"`
+	IP     string `json:"ip"`
+	CIDR   string `json:"cidr"`
 }
 
 func loadNetConfig(stdin []byte) (*NetConf, error) {
@@ -30,11 +31,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	ip := n.IP
-
 	result := types.Result{}
-	if ip != "" {
-		_, ipn, err := net.ParseCIDR(ip)
+	if n.CIDR != "" {
+		_, ipn, err := net.ParseCIDR(n.CIDR)
 		if err != nil {
 			return err
 		}
