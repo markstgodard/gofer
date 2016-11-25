@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"runtime"
 
@@ -52,9 +53,12 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	ip := n.IP
-	if ip == "" {
+	if n.IP == "" {
 		return errors.New("Missing 'ip' in delegate call to CNI plugin!")
+	}
+
+	if n.CIDR == "" {
+		return errors.New("Missing 'cidr' in delegate call to CNI plugin!")
 	}
 
 	netns, err := ns.GetNS(args.Netns)
@@ -63,7 +67,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	defer netns.Close()
 
-	hostIfName, hwAddr, err := setupVeth(netns, args.IfName, n.MTU, ip)
+	vr, err := setupVeth(netns, args.IfName, n.MTU, n.IP, n.CIDR)
 	if err != nil {
 		return err
 	}
@@ -73,25 +77,25 @@ func cmdAdd(args *skel.CmdArgs) error {
 	// bridgeName     = "ovs-bridge"
 	// tunnelPortName = "remote-tun"
 
-	containerIP := ip
-	containerMAC := hwAddr
+	containerIP := n.IP
+	containerMAC := vr.HwAddr
 	// containerMAC := "00:00:00:00:00:01"
-	if hwAddr == "" {
-		return fmt.Errorf("Invalid MAC address for container: [%s]", hwAddr)
+	if vr.HwAddr == "" {
+		return fmt.Errorf("Invalid MAC address for container: [%s]", vr.HwAddr)
 	}
 
-	// TODO: hack
+	// TODO: hack for now
 	tunnelID := 101
 	ovsPortNumber := 10
 
-	err = connectToOVS(n.BinPath, n.BrName, hostIfName, ovsPortNumber, containerIP, containerMAC, tunnelID)
+	err = connectToOVS(n.BinPath, n.BrName, vr.HostIfName, ovsPortNumber, containerIP, containerMAC, tunnelID)
 	if err != nil {
 		return err
 	}
 
 	result := types.Result{}
-	if ip != "" {
-		_, ipn, err := net.ParseCIDR(ip)
+	if n.CIDR != "" {
+		_, ipn, err := net.ParseCIDR(n.CIDR)
 		if err != nil {
 			return err
 		}
@@ -100,14 +104,24 @@ func cmdAdd(args *skel.CmdArgs) error {
 				IP:   ipn.IP,
 				Mask: ipn.Mask,
 			},
+			Routes:  vr.Routes,
+			Gateway: vr.GW,
 		}
 	}
+
 	return result.Print()
 }
 
-func setupVeth(netns ns.NetNS, ifName string, mtu int, ipAddr string) (string, string, error) {
-	var hostVethName string
-	var hwAddr string
+type vethResult struct {
+	HostIfName string
+	HwAddr     string
+	GW         net.IP
+	Routes     []types.Route
+}
+
+func setupVeth(netns ns.NetNS, ifName string, mtu int, ipAddr, cidr string) (vethResult, error) {
+	var result vethResult
+	var routes []types.Route
 
 	err := netns.Do(func(hostNS ns.NetNS) error {
 		// create the veth pair in the container and move host end into host netns
@@ -115,7 +129,7 @@ func setupVeth(netns ns.NetNS, ifName string, mtu int, ipAddr string) (string, s
 		if err != nil {
 			return err
 		}
-		hostVethName = hostVeth.Attrs().Name
+		result.HostIfName = hostVeth.Attrs().Name
 
 		// set HW addr
 		ip4 := net.ParseIP(ipAddr)
@@ -128,20 +142,84 @@ func setupVeth(netns ns.NetNS, ifName string, mtu int, ipAddr string) (string, s
 			return err
 		}
 
-		hwAddr = string(nl.Attrs().HardwareAddr)
+		addr, err := netlink.ParseAddr(cidr)
+		if err != nil {
+			return err
+		}
+
+		// fmt.Sprintf("ip addr add %s/%d dev %s", containerIP, containerIPAddressMask, containerIfName))
+		err = netlink.AddrAdd(nl, addr)
+		if err != nil {
+			return err
+		}
+
+		result.HwAddr = nl.Attrs().HardwareAddr.String()
+
+		if err = netlink.LinkSetUp(nl); err != nil {
+			return fmt.Errorf("failed to set %q UP: %v", ifName, err)
+		}
+
+		// TODO: ultra hack
+		_, ipn, err := net.ParseCIDR("10.0.3.0/24")
+		if err != nil {
+			return err
+		}
+		routes = append(routes, types.Route{
+			Dst: net.IPNet{
+				IP:   ipn.IP,
+				Mask: ipn.Mask,
+			},
+		})
+
+		// _, ipn, err = net.ParseCIDR("0.0.0.0/0")
+		// if err != nil {
+		// 	return err
+		// }
+		// gwAddr := net.ParseIP("10.0.3.1")
+		// result.GW = gwAddr
+		// routes = append(routes, types.Route{
+		// 	Dst: net.IPNet{
+		// 		IP:   ipn.IP,
+		// 		Mask: ipn.Mask,
+		// 	},
+		// 	GW: gwAddr,
+		// })
+
+		// "result":
+		//    IP4:{IP:{IP:10.255.47.89 Mask:ffffff00} Gateway:10.255.47.1
+		// Routes:[
+		//    {Dst:{IP:10.255.0.0 Mask:ffff0000} GW:\\u003cnil\\u003e}
+		//    {Dst:{IP:0.0.0.0 Mask:00000000} GW:10.255.47.1}]},
+		//    DNS:{Nameservers:[] Domain: Search:[] Options:[]} }
+
+		// default via 10.255.47.1 dev eth0
+		// 10.255.0.0/16 via 10.255.47.1 dev eth0
+		// 10.255.47.0/24 dev eth0  proto kernel  scope link  src 10.255.47.71
+
+		for _, r := range routes {
+			gw := r.GW
+			// if gw == nil {
+			// 	gw = result.GW
+			// }
+			if err = ip.AddRoute(&r.Dst, gw, nl); err != nil {
+				if !os.IsExist(err) {
+					return fmt.Errorf("failed to add route '%v via %v dev %v': %v", r.Dst, gw, ifName, err)
+				}
+			}
+		}
 
 		return nil
 	})
 	if err != nil {
-		return "", "", err
+		return result, err
 	}
 
-	_, err = netlink.LinkByName(hostVethName)
+	_, err = netlink.LinkByName(result.HostIfName)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to lookup %q: %v", hostVethName, err)
+		return result, fmt.Errorf("failed to lookup %q: %v", result.HostIfName, err)
 	}
 
-	return hostVethName, hwAddr, nil
+	return result, nil
 }
 
 var debug bool
@@ -166,7 +244,7 @@ func connectToOVS(path, ovsBridgeName, interfaceName string, ovsPortNumber int, 
 
 	err = addFlow(path, containerIP, containerMAC, ovsBridgeName, ovsPortNumber, tunnelID)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("error adding flow using ip [%s] mac [%s] port [%d] tun [%d] error: %s\n", containerIP, containerMAC, ovsPortNumber, tunnelID, err)
 	}
 
 	anotherFlow := fmt.Sprintf("%s/ovs-ofctl add-flow %s 'table=0,in_port=%d,actions=set_field:%d->tun_id,resubmit(,1)'", path, ovsBridgeName, ovsPortNumber, tunnelID)
@@ -227,16 +305,16 @@ func cmdDel(args *skel.CmdArgs) error {
 	// 	return err
 	// }
 
-	var ipn *net.IPNet
-	err := ns.WithNetNSPath(args.Netns, func(_ ns.NetNS) error {
-		var err error
-		ipn, err = ip.DelLinkByNameAddr(args.IfName, netlink.FAMILY_V4)
-		return err
-	})
+	// var ipn *net.IPNet
+	// err := ns.WithNetNSPath(args.Netns, func(_ ns.NetNS) error {
+	// 	var err error
+	// 	ipn, err = ip.DelLinkByNameAddr(args.IfName, netlink.FAMILY_V4)
+	// 	return err
+	// })
 
-	if err != nil {
-		return err
-	}
+	// if err != nil {
+	// 	return err
+	// }
 	return nil
 }
 

@@ -223,8 +223,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	// pass ip_addr to delegate CNI plugin
 	ip := p.FixedIPs[0].IPAddress
+	cidr := fmt.Sprintf("%s/32", ip)
 	n.Delegate["ip"] = ip
-	n.Delegate["cidr"] = fmt.Sprintf("%s/32", ip)
+	n.Delegate["cidr"] = cidr
 
 	err = delegateAdd(args.ContainerID, n.Delegate)
 	if err != nil {
@@ -235,7 +236,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	// save container state (container id, ip, neutron port id)
 	cs := ContainerState{
-		IP:            ip,
+		IP:            cidr,
 		NeutronPortID: p.ID,
 	}
 	err = saveContainerState(args.ContainerID, cs, n.StateDir)
