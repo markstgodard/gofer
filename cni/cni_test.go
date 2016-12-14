@@ -164,7 +164,7 @@ var _ = Describe("Neutron CNI Plugin", func() {
 			data, err := ioutil.ReadFile(path)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(data).To(MatchJSON(`{
-  "ip": "1.2.3.4",
+  "ip": "1.2.3.4/32",
    "neutron_port_id": "ebe69f1e-bc26-4db5-bed0-c0afb4afe3db"
 }`))
 
